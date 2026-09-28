@@ -5,7 +5,7 @@ Use one Render Web Service whenever possible. It serves the Vite client, API, an
 Build command:
 
 ```text
-npm ci && npm run build
+npm ci --include=dev && npm run build
 ```
 
 Start command:
