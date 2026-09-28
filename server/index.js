@@ -1,5 +1,7 @@
 import "dotenv/config";
 import http from "http";
+import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -13,9 +15,12 @@ import { Server } from "socket.io";
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const CLIENT_URL = process.env.CLIENT_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:5173";
 const JWT_SECRET = process.env.JWT_SECRET;
 const MONGODB_URI = process.env.MONGODB_URI;
+const isProduction = process.env.NODE_ENV === "production";
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const clientBuildPath = path.join(projectRoot, "dist");
 
 if (!JWT_SECRET || !MONGODB_URI) {
   throw new Error("JWT_SECRET and MONGODB_URI are required environment variables.");
@@ -145,6 +150,7 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors({ origin: CLIENT_URL, credentials: true }));
 app.use(express.json({ limit: "15mb" }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+if (isProduction) app.use(express.static(clientBuildPath));
 app.use(
   "/api",
   rateLimit({
@@ -934,6 +940,15 @@ app.post("/api/classrooms/:classroomId/messages", authRequired, async (req, res)
   });
   res.status(201).json({ message: { ...message, sId: req.user._id.toString() } });
 });
+
+// Render serves the Vite build and API together, so browser refreshes on SPA
+// routes need the client entry point after all API routes have been handled.
+if (isProduction) {
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) return next();
+    return res.sendFile(path.join(clientBuildPath, "index.html"));
+  });
+}
 
 app.use((err, _req, res, _next) => {
   console.error(err);

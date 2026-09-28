@@ -8,6 +8,7 @@
     "dev:full": "concurrently \"npm run mongo\" \"npm run server\" \"npm run client\"",
     "client": "vite",
     "server": "node server/index.js",
+    "start": "node server/index.js",
     "mongo": "C:\\mongodb\\bin\\mongod.exe --dbpath C:\\mongodb\\data\\db",
     "build": "vite build",
     "lint": "eslint .",

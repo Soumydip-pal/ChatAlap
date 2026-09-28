@@ -1,8 +1,9 @@
 import { toast } from "react-toastify";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-const SOCKET_URL = API_URL.replace(/\/api\/?$/, "");
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000/api" : "/api");
+const SOCKET_URL = API_URL.startsWith("http") ? API_URL.replace(/\/api\/?$/, "") : window.location.origin;
 const TOKEN_KEY = "chatalap_token";
+const REQUEST_TIMEOUT_MS = 20_000;
 
 const getToken = () => localStorage.getItem(TOKEN_KEY);
 
@@ -20,10 +21,24 @@ const request = async (path, options = {}) => {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("ChatAlap server did not respond. Please try again in a moment.");
+    }
+    throw new Error("Unable to reach the ChatAlap server. Please check the deployment configuration.");
+  } finally {
+    window.clearTimeout(timeout);
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
