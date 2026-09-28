@@ -951,7 +951,16 @@ if (isProduction) {
 }
 
 app.use((err, _req, res, _next) => {
-  console.error(err);
+  if (err?.code === 11000) {
+    const field = Object.keys(err.keyPattern || {})[0] || "account detail";
+    return res.status(409).json({ message: `That ${field} is already in use` });
+  }
+
+  if (err?.name === "ValidationError") {
+    return res.status(400).json({ message: "Please check the information and try again" });
+  }
+
+  console.error("Unhandled API error:", err);
   res.status(500).json({ message: "Server error" });
 });
 
