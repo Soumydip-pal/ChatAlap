@@ -141,7 +141,7 @@ const AppContextProvider = ({ children }) => {
 
   // Update last seen every 60s
   useEffect(() => {
-    if (!userData) return;
+    if (!userData?.id) return;
     const interval = setInterval(async () => {
       try {
         await updateLastSeen();
@@ -170,7 +170,7 @@ const AppContextProvider = ({ children }) => {
       ignore = true;
       clearInterval(interval);
     };
-  }, [userData?.id]);
+  }, [userData?.id, socketReady]);
 
   useEffect(() => {
     if (!messagesId) return;

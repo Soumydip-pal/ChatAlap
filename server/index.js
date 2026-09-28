@@ -15,7 +15,10 @@ import { Server } from "socket.io";
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
-const CLIENT_URL = process.env.CLIENT_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:5173";
+const CLIENT_URLS = (process.env.CLIENT_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:5173")
+  .split(",")
+  .map((url) => url.trim())
+  .filter(Boolean);
 const JWT_SECRET = process.env.JWT_SECRET;
 const MONGODB_URI = process.env.MONGODB_URI;
 const isProduction = process.env.NODE_ENV === "production";
@@ -31,8 +34,7 @@ try {
   await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
 } catch (error) {
   console.error("\nChatAlap could not connect to MongoDB.");
-  console.error(`Configured MONGODB_URI: ${MONGODB_URI}`);
-  console.error("Start MongoDB first, or set MONGODB_URI to a running MongoDB/Atlas connection string.");
+  console.error("Verify that MONGODB_URI uses an active Atlas cluster, valid credentials, and permitted network access.");
   console.error("Local Windows command: npm run mongo");
   console.error(`MongoDB error: ${error.message}\n`);
   process.exit(1);
@@ -147,7 +149,7 @@ const MessageThread = mongoose.model("MessageThread", messageSchema);
 const Classroom = mongoose.model("Classroom", classroomSchema);
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(cors({ origin: CLIENT_URL, credentials: true }));
+app.use(cors({ origin: CLIENT_URLS, credentials: true }));
 app.use(express.json({ limit: "15mb" }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 if (isProduction) app.use(express.static(clientBuildPath));
@@ -162,7 +164,7 @@ app.use(
 );
 
 const io = new Server(server, {
-  cors: { origin: CLIENT_URL, credentials: true },
+  cors: { origin: CLIENT_URLS, credentials: true },
   maxHttpBufferSize: 15 * 1024 * 1024,
 });
 
@@ -327,6 +329,21 @@ const leaveCallRoom = (socket, roomId) => {
   if (room.size === 0) callRooms.delete(roomId);
 };
 
+const canJoinCallRoom = async (userId, roomId, messageId) => {
+  if (typeof roomId !== "string" || roomId.length < 3 || roomId.length > 160) return false;
+
+  if (messageId) {
+    return mongoose.Types.ObjectId.isValid(messageId) && ownsThread(userId, messageId);
+  }
+
+  const classroom = await Classroom.exists({ meetingRoomId: roomId, members: userId });
+  if (classroom) return true;
+
+  // Lobby IDs are explicitly shareable instant rooms. Classroom and DM rooms
+  // must always be authorized through their persisted membership records.
+  return /^lobby-[a-zA-Z0-9_-]+$/.test(roomId);
+};
+
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
@@ -374,7 +391,11 @@ io.on("connection", async (socket) => {
   });
 
   socket.on("call:join", async ({ roomId, messageId, media = "video" }) => {
-    if (messageId && !(await ownsThread(socket.user._id, messageId))) return;
+    if (!(await canJoinCallRoom(socket.user._id, roomId, messageId))) {
+      socket.emit("call:denied", { roomId });
+      return;
+    }
+    if (!["audio", "video"].includes(media)) return;
     const room = callRooms.get(roomId) || new Map();
     if (!room.has(socket.id) && room.size >= 5) {
       socket.emit("call:full", { roomId, limit: 5 });
@@ -399,6 +420,9 @@ io.on("connection", async (socket) => {
   });
 
   socket.on("call:signal", ({ roomId, to, signal }) => {
+    const room = callRooms.get(roomId);
+    if (!room?.has(socket.id)) return;
+    if (to && !room.has(to)) return;
     const payload = { from: socket.id, userId, signal };
     if (to) io.to(to).emit("call:signal", payload);
     else socket.to(`call:${roomId}`).emit("call:signal", payload);
